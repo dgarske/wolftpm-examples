@@ -7,3 +7,7 @@ tpm_identity.elf
 tpm_identity.bin
 tpm_identity.ld
 tpm_identity.map
+mldsa_onboard.elf
+mldsa_onboard.bin
+mldsa_onboard.ld
+mldsa_onboard.map

@@ -128,3 +128,38 @@ tpm_identity.bin: tpm_identity.elf
 
 tpm-clean:
 	rm -f tpm_identity.elf tpm_identity.bin tpm_identity.ld tpm_identity.map
+
+# ---------------------------------------------------------------------------
+# The sign-and-verify act, run entirely on the board.
+# ---------------------------------------------------------------------------
+ONB_SRCS = mldsa_onboard.c tpm_io_i2c_c3.c heap.c \
+           $(WT)/tpm2.c $(WT)/tpm2_packet.c $(WT)/tpm2_tis.c \
+           $(WT)/tpm2_wrap.c $(WT)/tpm2_crypto.c $(WT)/tpm2_util.c \
+           $(WT)/tpm2_param_enc.c \
+           $(WC)/sha256.c $(WC)/sha512.c $(WC)/sha3.c $(WC)/hash.c \
+           $(WC)/memory.c $(WC)/wc_port.c $(WC)/logging.c $(WC)/misc.c \
+           $(WC)/asn.c $(WC)/coding.c $(WC)/aes.c $(WC)/hmac.c \
+           $(WC)/random.c $(WC)/ecc.c $(WC)/sp_int.c $(WC)/sp_cortexm.c \
+           $(WC)/wolfmath.c $(WC)/wc_mldsa.c \
+           $(WOLFBOOT_DIR)/hal/psoc_c3.c \
+           $(WOLFBOOT_DIR)/hal/i2c/i2c_drv_psoc_c3.c \
+           $(WOLFBOOT_DIR)/test-app/startup_arm.c
+
+.PHONY: onboard onboard-clean
+onboard: mldsa_onboard.bin
+	@$(SIZE) mldsa_onboard.elf
+
+mldsa_onboard.ld: $(WOLFBOOT_DIR)/test-app/ARM-psoc_c3.ld
+	sed -e "s/@WOLFBOOT_TEST_APP_ADDRESS@/$(APP_ADDR)/g" \
+	    -e "s/@WOLFBOOT_TEST_APP_SIZE@/$(APP_SIZE)/g" $< > $@
+
+mldsa_onboard.elf: $(ONB_SRCS) mldsa_onboard.ld
+	$(CC) $(TPM_CFLAGS) $(ONB_SRCS) -mcpu=cortex-m33 -mthumb -nostartfiles \
+	    -ffreestanding -Wl,-gc-sections -Wl,-Map=mldsa_onboard.map \
+	    -T mldsa_onboard.ld -o $@
+
+mldsa_onboard.bin: mldsa_onboard.elf
+	$(OBJCOPY) -O binary $< $@
+
+onboard-clean:
+	rm -f mldsa_onboard.elf mldsa_onboard.bin mldsa_onboard.ld mldsa_onboard.map

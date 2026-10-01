@@ -58,6 +58,10 @@
 #define WOLFTPM_ADV_IO
 #define WOLFTPM_SMALL_STACK
 
+/* TPM 2.0 v1.85, which additively enables the post-quantum algorithm set:
+ * Hash-ML-DSA templates, signing and the ML-DSA public key union member. */
+#define WOLFTPM_V185
+
 /* Declares TPM2_IoCb without compiling any of wolfTPM's own HAL sources,
  * which is how wolfTPM expects an application to supply its own. The
  * implementation is in tpm_io_i2c_c3.c; WOLFTPM_INCLUDE_IO_FILE is

@@ -105,3 +105,40 @@ Taken with the benchmark above, a board-side act therefore costs roughly 10 KB o
 ### The strap, when there is no bootloader
 
 A standalone image has to drive the interface-select strap itself, and it is the first thing `main()` does. The TPM latches its bus from that pin while its own reset is low, and its reset trails the CPU's by about a millisecond, so there is very little time. With wolfBoot in front of the application `hal_init()` has already done it; the standalone path only just gets there.
+
+## The whole act, on the board
+
+`mldsa_onboard.c` runs the demo's central beat with no host taking part in the cryptography: the TPM creates a Hash-ML-DSA key and signs a SHA-256 digest, and the MCU verifies that signature itself with wolfCrypt. Only the public key ever leaves the TPM.
+
+```
+make onboard WOLFBOOT_DIR=<wolfboot> WOLFSSL_DIR=<wolfssl> WOLFTPM_DIR=<wolftpm>
+```
+
+Measured on a C3M6, 1 October 2026:
+
+```
+{"event":"run.start","host":"psoc_c3","alg":"HASH_MLDSA","param_set":87}
+{"event":"tpm.startup","ok":true}
+{"event":"key.create","alg":"HASH_MLDSA","pub_bytes":2592,"ms":1402}
+{"event":"sign.digest","alg":"HASH_MLDSA","param_set":87,"sig_bytes":4627,"ms":1526}
+{"event":"sign.bytes","alg":"HASH_MLDSA","bytes":4627,"b64":"..."}
+{"event":"verify.host","backend":"wolfcrypt","on":"psoc_c3","result":"valid","ms":41}
+{"event":"result","pass":true}
+{"event":"run.end"}
+```
+
+The 41 ms verification agrees with the standalone benchmark above, which is a useful cross-check: the figure is the same whether ML-DSA runs on its own or after a TPM exchange. The TPM's own key creation and signing dominate, as they do on a host.
+
+These are the same newline-delimited JSON events the host-side example emits, so an existing UI consumes them unchanged. The base64 encoder streams three bytes at a time with no staging buffer, which is what lets a 4627 byte signature leave a part that has nowhere to hold the encoded form.
+
+### Footprint
+
+```
+   text   52676    data 1360    bss 51164
+```
+
+About 54 KB of flash and 52 KB of RAM, the latter including a 24 KB heap for wolfTPM's internal allocations, the 9 KB ML-DSA key object, the signature buffer and the 5 KB TPM command and response buffers. On a part with 512 KB of flash and 128 KB of SRAM there is room for the remaining acts.
+
+### A note on the template helper
+
+`wolfTPM2_GetKeyTemplate_HASH_MLDSA()` takes the object attributes before the parameter set. Passing them the other way round produces `TPM_RC_RESERVED_BITS` on parameter 2 rather than anything that points at the argument order, so it is worth getting right first time.

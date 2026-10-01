@@ -132,7 +132,7 @@ tpm-clean:
 # ---------------------------------------------------------------------------
 # The sign-and-verify act, run entirely on the board.
 # ---------------------------------------------------------------------------
-ONB_SRCS = mldsa_onboard.c tpm_io_i2c_c3.c heap.c \
+ONB_SRCS = mldsa_onboard.c act_sign.c demo_util.c tpm_io_i2c_c3.c heap.c \
            $(WT)/tpm2.c $(WT)/tpm2_packet.c $(WT)/tpm2_tis.c \
            $(WT)/tpm2_wrap.c $(WT)/tpm2_crypto.c $(WT)/tpm2_util.c \
            $(WT)/tpm2_param_enc.c \
@@ -163,3 +163,27 @@ mldsa_onboard.bin: mldsa_onboard.elf
 
 onboard-clean:
 	rm -f mldsa_onboard.elf mldsa_onboard.bin mldsa_onboard.ld mldsa_onboard.map
+
+# ---------------------------------------------------------------------------
+# All the demo acts in one image, selected by a command byte on the console.
+# ---------------------------------------------------------------------------
+ACTS_SRCS = $(subst mldsa_onboard.c,demo_acts.c,$(ONB_SRCS))
+
+.PHONY: acts acts-clean
+acts: demo_acts.bin
+	@$(SIZE) demo_acts.elf
+
+demo_acts.ld: $(WOLFBOOT_DIR)/test-app/ARM-psoc_c3.ld
+	sed -e "s/@WOLFBOOT_TEST_APP_ADDRESS@/$(APP_ADDR)/g" \
+	    -e "s/@WOLFBOOT_TEST_APP_SIZE@/$(APP_SIZE)/g" $< > $@
+
+demo_acts.elf: $(ACTS_SRCS) demo_acts.ld
+	$(CC) $(TPM_CFLAGS) $(ACTS_SRCS) -mcpu=cortex-m33 -mthumb -nostartfiles \
+	    -ffreestanding -Wl,-gc-sections -Wl,-Map=demo_acts.map \
+	    -T demo_acts.ld -o $@
+
+demo_acts.bin: demo_acts.elf
+	$(OBJCOPY) -O binary $< $@
+
+acts-clean:
+	rm -f demo_acts.elf demo_acts.bin demo_acts.ld demo_acts.map

@@ -142,3 +142,30 @@ About 54 KB of flash and 52 KB of RAM, the latter including a 24 KB heap for wol
 ### A note on the template helper
 
 `wolfTPM2_GetKeyTemplate_HASH_MLDSA()` takes the object attributes before the parameter set. Passing them the other way round produces `TPM_RC_RESERVED_BITS` on parameter 2 rather than anything that points at the argument order, so it is worth getting right first time.
+
+## All the acts, selected by a command byte
+
+`demo_acts.c` puts the acts in one image and picks between them with a single
+character on the console, so a host-side demo server becomes a serial reader
+rather than something that spawns programs and parses their output.
+
+| Byte | Act |
+| --- | --- |
+| `i` | identity: vendor and firmware |
+| `p` | measured boot: read the PCR bank |
+| `s` | sign and verify |
+| `t` | sign and verify with a tampered signature, which must be rejected |
+| `l` | sealed secret: seal to a PCR, unseal, extend, fail, reset |
+| `e` | endorsement: read the EK certificates out of NV |
+
+```
+make acts WOLFBOOT_DIR=<wolfboot> WOLFSSL_DIR=<wolfssl> WOLFTPM_DIR=<wolftpm>
+```
+
+Footprint: `text 61956  data 1360  bss 52764`, so about 62 KB of flash and 54 KB of RAM for every act in one image. The acts share `demo_util.c` for console output and timing and `act_sign.c` for the signing beat, so the single-act `mldsa_onboard` image and this one run the same code rather than two copies of it.
+
+Anything other than a listed character is ignored, so a host opening the port and sending line noise cannot start a run.
+
+### Test status
+
+Honest state as of 1 October 2026: **identity and sign-and-verify are verified on hardware**, with the figures quoted above. **PCR, sealed secret and endorsement are written and build, but have not been run**, because the TPM entered its failure mode before they could be exercised and clearing it needs power removed. The sealing sequence follows the host-side example's: load the blob, start a policy session, `TPM2_PolicyPCR`, then `TPM2_Unseal`, with a refusal after the PCR is extended being the pass.

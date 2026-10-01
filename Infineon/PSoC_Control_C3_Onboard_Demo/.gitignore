@@ -11,3 +11,7 @@ mldsa_onboard.elf
 mldsa_onboard.bin
 mldsa_onboard.ld
 mldsa_onboard.map
+demo_acts.elf
+demo_acts.bin
+demo_acts.ld
+demo_acts.map

@@ -325,8 +325,22 @@ static void handle_one(void)
     }
 }
 
+/* The TPM latches its bus from this strap while its own reset is low, and
+ * its reset trails the CPU's by about a millisecond. wolfBoot's hal_init()
+ * has already driven it when the gateway is booted as a verified
+ * application; doing it again is harmless and is what lets the same image
+ * also run standalone, where nothing else would. */
+static void tpm_iface_select(void)
+{
+    psoc_c3_peri_init();
+    psoc_c3_pin_setup(PSOC_C3_TPM_SEL_PORT, PSOC_C3_TPM_SEL_PIN, 0,
+            GPIO_CFG_DM_STRONG);
+    GPIO_PRT_OUT(PSOC_C3_TPM_SEL_PORT) &= ~(1UL << PSOC_C3_TPM_SEL_PIN);
+}
+
 void main(void)
 {
+    tpm_iface_select();
     uart_init();
     i2c_init();
 

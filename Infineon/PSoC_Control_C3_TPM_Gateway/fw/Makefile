@@ -47,7 +47,7 @@ OBJCOPY  = $(CROSS)objcopy
 
 # Board wiring. These match the defaults in wolfBoot's arch.mk and are spelled
 # out rather than inherited so the example documents its own pinout.
-DEFS = -DTARGET_psoc_c3 -DWOLFBOOT_TPM_I2C \
+DEFS = -DTARGET_psoc_c3 -DWOLFBOOT_TPM_I2C -DPSOC_C3_TPM_SEL_PORT=7 -DPSOC_C3_TPM_SEL_PIN=7 \
        -DPSOC_C3_UART_SCB=3 -DPSOC_C3_UART_PORT=6 \
        -DPSOC_C3_UART_PCLK_GR=4 -DPSOC_C3_UART_PCLK_IDX=6 \
        -DPSOC_C3_PCLK_HZ=48000000 \
@@ -55,9 +55,15 @@ DEFS = -DTARGET_psoc_c3 -DWOLFBOOT_TPM_I2C \
        -DPSOC_C3_I2C_SCL_PIN=0 -DPSOC_C3_I2C_SDA_PIN=2 \
        -DPSOC_C3_I2C_HSIOM_SEL=15 -DPSOC_C3_I2C_HZ=100000
 
+# Board options go in EXTRA_CFLAGS, not CFLAGS: a CFLAGS set on the command
+# line replaces this assignment outright rather than adding to it, which would
+# drop every include path above.
+EXTRA_CFLAGS ?=
+
 CFLAGS  += -mcpu=cortex-m33 -mthumb -Os -Wall -Wextra \
            -ffreestanding -ffunction-sections -fdata-sections -fno-common \
-           -I$(WOLFBOOT_DIR) -I$(WOLFBOOT_DIR)/include -I. $(DEFS)
+           -I$(WOLFBOOT_DIR) -I$(WOLFBOOT_DIR)/include -I. $(DEFS) \
+           $(EXTRA_CFLAGS)
 LDFLAGS += -mcpu=cortex-m33 -mthumb -nostartfiles -ffreestanding \
            -Wl,-gc-sections -Wl,-Map=gateway.map -T gateway.ld
 

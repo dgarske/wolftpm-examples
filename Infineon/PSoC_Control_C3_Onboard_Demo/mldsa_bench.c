@@ -59,14 +59,26 @@ extern void uart_write(const char *buf, unsigned int sz);
 
 static int use_dwt;
 
-/* Reported alongside the cycle count so the figure can be read as time. The
- * part comes out of reset on its internal oscillator. */
+/* Reported alongside the cycle count so the figure can be read as time.
+ * Measured at 180.17 MHz on a C3M6 by timing CLKCAL_CYCLES against a host
+ * clock; note this is the core clock and not the 48 MHz peripheral clock the
+ * console divider is derived from. */
 #ifndef CPU_HZ
-#define CPU_HZ 48000000UL
+#define CPU_HZ 180000000UL
 #endif
 
 #ifndef BENCH_ITERATIONS
 #define BENCH_ITERATIONS 5
+#endif
+
+/* Cycles to spin between two console markers so a host can derive the core
+ * clock from the wall time between them. Large enough that serial latency is
+ * noise against it. */
+#ifndef CLKCAL_CYCLES
+#define CLKCAL_CYCLES 100000000UL
+#endif
+#ifndef CLKCAL_ROUNDS
+#define CLKCAL_ROUNDS 3
 #endif
 
 /* The key object carries the verification working buffers under
@@ -156,6 +168,24 @@ static uint32_t elapsed(void)
     return (wraps * (SYST_RELOAD + 1UL)) + (start_lo - SYST_CVR);
 }
 
+/* Spin for a known number of processor cycles, bracketed by markers. The
+ * board has no wall clock of its own, so the only way to turn cycles into
+ * seconds is to let something that does have one watch the markers. */
+static void clock_calibrate(void)
+{
+    uint32_t i;
+    int r;
+
+    for (r = 0; r < CLKCAL_ROUNDS; r++) {
+        put("CLKCAL begin "); put_u32(CLKCAL_CYCLES); put("\r\n");
+        start_mark();
+        do {
+            i = elapsed();
+        } while (i < CLKCAL_CYCLES);
+        put("CLKCAL end "); put_u32(i); put("\r\n");
+    }
+}
+
 void main(void)
 {
     uint32_t cycles, best = 0xFFFFFFFFUL, worst = 0, total = 0;
@@ -172,6 +202,8 @@ void main(void)
 
     put(use_dwt ? "  timebase     DWT cycle counter\r\n"
                 : "  timebase     SysTick\r\n");
+    clock_calibrate();
+
     put("  public key   "); put_u32(MLDSA_TV_PUB_LEN); put(" bytes\r\n");
     put("  signature    "); put_u32(MLDSA_TV_SIG_LEN); put(" bytes\r\n");
     put("  key object   "); put_u32((uint32_t)sizeof(MlDsaKey)); put(" bytes\r\n");

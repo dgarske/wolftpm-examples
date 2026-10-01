@@ -15,15 +15,17 @@ Measured on a PSOC Control C3 (C3M6), 1 October 2026:
   public key   2592 bytes
   signature    4627 bytes
   key object   9112 bytes
-  run 1: 7473689 cycles
-  run 2: 7470456 cycles
-  run 3: 7470456 cycles
-  run 4: 7470456 cycles
-  run 5: 7470456 cycles
+  run 1: 7476351 cycles, 41 ms at 180 MHz
+  run 2: 7472930 cycles, 41 ms at 180 MHz
+  run 3: 7472930 cycles, 41 ms at 180 MHz
+  run 4: 7472930 cycles, 41 ms at 180 MHz
+  run 5: 7472930 cycles, 41 ms at 180 MHz
+  best 7472930 worst 7476351 mean 7473614 cycles
+  mean 41 ms
 PASS
 ```
 
-**7.47 million cycles**, repeatable to within 0.04 percent once the first run has warmed the flash cache. The cycle count is the figure to quote because it does not depend on how the core is clocked; at 48 MHz it is 155 ms, and at the 180 MHz this family supports it would be about 41 ms. Either way it sits comfortably inside a demo beat.
+**7.47 million cycles, or 41 ms**, repeatable to within 0.05 percent once the first run has warmed the flash cache. That is fast enough that the verification is not the slow part of a demo beat; the TPM's own signing takes between one and two and a half seconds.
 
 ### Footprint
 
@@ -52,10 +54,17 @@ make mldsa_bench.bin WOLFBOOT_DIR=<wolfboot> WOLFSSL_DIR=<wolfssl> \
 
 Then flash `mldsa_bench.bin` at `0x22000000` with J-Link and read the console at 115200.
 
-### Timebase
+### Timebase and core clock
 
 The benchmark prefers the trace unit's cycle counter and falls back to SysTick, reporting which it used. Not every Cortex-M33 implements the trace unit and TrustZone can put it out of reach, so a figure taken from a counter that was never running would otherwise look like a real measurement. On this part the trace unit works.
 
-## Still to confirm
+The core clock is measured rather than assumed. `clock_calibrate()` spins for a known number of cycles between two console markers, and a host timing those markers derives the clock:
 
-The core clock was not measured. 48 MHz is the power-on rate for this family and is what the millisecond figures assume; confirming it, or raising it, only scales the result.
+```
+  100000006 cycles in 0.5550 s -> 180.175 MHz
+  100000006 cycles in 0.5551 s -> 180.158 MHz
+  100000019 cycles in 0.5550 s -> 180.175 MHz
+  100000019 cycles in 0.5550 s -> 180.192 MHz
+```
+
+**180.17 MHz**, consistent to 0.02 percent across four rounds. Worth stating plainly because it is easy to get wrong: this is the core clock, and it is not the 48 MHz peripheral clock that the console baud divider is derived from. Assuming the peripheral rate applied to the core would overstate every timing on this part by a factor of nearly four.

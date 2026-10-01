@@ -1,0 +1,6 @@
+bin/
+fw/gateway.elf
+fw/gateway.bin
+fw/gateway.ld
+fw/gateway.map
+fw/gateway_v*_signed.bin

@@ -20,6 +20,14 @@ Build steps:
 * `make program`
 * See [wolfTPM Firmware Example](https://github.com/wolfSSL/wolfTPM/tree/master/examples/firmware) for next steps
 
+## Infineon PSOC Control C3 UART-to-I2C TPM Gateway
+
+See [Infineon/PSoC_Control_C3_TPM_Gateway](/Infineon/PSoC_Control_C3_TPM_Gateway).
+
+Drives a TPM 2.0 from a PC that has no I2C, by making a PSOC Control C3 the bus adapter. wolfBoot verifies and boots the bridge, so the adapter itself is measured before it runs. Needs the wolfBoot PSOC Control C3 target: https://github.com/wolfSSL/wolfBoot/pull/915
+
+wolfTPM is unmodified; the example supplies its own IO callback.
+
 ## STM32H5 Firmware TPM (fwTPM) Port
 
 See [STM32/fwtpm-stm32h5](STM32/fwtpm-stm32h5).

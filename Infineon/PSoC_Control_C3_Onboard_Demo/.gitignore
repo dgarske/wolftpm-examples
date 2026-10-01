@@ -1,0 +1,5 @@
+mldsa_bench.elf
+mldsa_bench.bin
+mldsa_bench.ld
+mldsa_bench.map
+mldsa_bench_v*_signed.bin

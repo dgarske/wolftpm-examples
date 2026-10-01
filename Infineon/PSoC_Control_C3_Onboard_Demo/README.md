@@ -168,4 +168,20 @@ Anything other than a listed character is ignored, so a host opening the port an
 
 ### Test status
 
-Honest state as of 1 October 2026: **identity and sign-and-verify are verified on hardware**, with the figures quoted above. **PCR, sealed secret and endorsement are written and build, but have not been run**, because the TPM entered its failure mode before they could be exercised and clearing it needs power removed. The sealing sequence follows the host-side example's: load the blob, start a policy session, `TPM2_PolicyPCR`, then `TPM2_Unseal`, with a refusal after the PCR is extended being the pass.
+Measured on hardware, 1 October 2026, driven by `onboard.py` from the demo repository:
+
+| Act | State |
+| --- | --- |
+| identity | works |
+| measured boot (PCR) | works, all 24 indices |
+| sign and verify | works, figures above |
+| sealed secret | **fails**, see below |
+| endorsement | **fails**, finds no certificates |
+
+The sealed-secret act gets as far as creating the blob and then both unseals return `TPM_RC_POLICY_FAIL` (0x99d), including the one taken while the measurement still matches. So the policy the blob was sealed under is not the policy the session presents. The host-side example computes the digest explicitly with a trial session and `wolfTPM2_GetPolicyDigest`, rather than letting `wolfTPM2_CreateKeySeal_ex` derive it from a PCR list, and matching that is the next thing to try.
+
+The endorsement act reads nothing from the two TCG certificate indices it tries. The host-side example finds five certificates, so it is looking in more places and almost certainly reading the public area first to size the buffer.
+
+Both are reported honestly rather than quietly omitted, because an act that emits a plausible event stream while being wrong is worse than one that is absent.
+
+One trap worth recording from getting this far: **create an ECC storage root key, not an RSA one.** An RSA SRK on this part is slow enough that the act appears to hang, and has been seen to drop the TPM into failure mode, from which only removing power recovers it.

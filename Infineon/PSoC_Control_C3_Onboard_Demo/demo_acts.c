@@ -78,8 +78,11 @@ static void act_identity(void)
     demo_put("\",\"on\":\"psoc_c3\"}\r\n");
 }
 
+/* The digest length is in/out: it must carry the buffer size in, or the read
+ * fails with BUFFER_E before it ever reaches the TPM. */
 static int read_pcr(int index, byte *digest, int *digestSz)
 {
+    *digestSz = TPM_SHA256_DIGEST_SIZE;
     return wolfTPM2_ReadPCR(&dev, index, TPM_ALG_SHA256, digest, digestSz);
 }
 
@@ -176,7 +179,7 @@ static void act_seal(void)
     byte out[sizeof(seal_secret) + 1];
     byte pcrArray[1];
     TPMT_PUBLIC tpl;
-    int digestSz = 0, outSz, rc;
+    int digestSz = 0, outSz, rc, sealedOk = 0;
 
     memset(&primary, 0, sizeof(primary));
     memset(&seal, 0, sizeof(seal));
@@ -201,7 +204,10 @@ static void act_seal(void)
     demo_put_hexbuf(digest, (uint32_t)digestSz);
     demo_put("\"}\r\n");
 
-    rc = wolfTPM2_GetKeyTemplate_RSA_SRK(&tpl);
+    /* An ECC storage root key, deliberately. Creating an RSA SRK on this
+     * part is slow and has been seen to drop it into failure mode, from
+     * which only removing power recovers it. */
+    rc = wolfTPM2_GetKeyTemplate_ECC_SRK(&tpl);
     if (rc == TPM_RC_SUCCESS)
         rc = wolfTPM2_CreatePrimaryKey(&dev, &primary, TPM_RH_OWNER, &tpl,
                 NULL, 0);
@@ -230,11 +236,17 @@ static void act_seal(void)
     outSz = (int)sizeof(out);
     memset(out, 0, sizeof(out));
     rc = try_unseal(&primary, &seal, pcrArray, out, &outSz);
+    sealedOk = (rc == TPM_RC_SUCCESS);
     demo_put("{\"event\":\"seal.unseal\",\"stage\":\"before\",\"ok\":");
-    demo_put(rc == TPM_RC_SUCCESS ? "true" : "false");
-    if (rc == TPM_RC_SUCCESS) {
+    demo_put(sealedOk ? "true" : "false");
+    if (sealedOk) {
         demo_put(",\"secret\":\"");
         demo_put((const char *)out);
+        demo_put("\"");
+    }
+    else {
+        demo_put(",\"rc\":\"0x");
+        demo_put_hex32((uint32_t)rc);
         demo_put("\"");
     }
     demo_put("}\r\n");
@@ -260,9 +272,11 @@ static void act_seal(void)
     demo_put_hex32((uint32_t)rc);
     demo_put("\"}\r\n");
 
-    /* A refusal here is the pass: the secret is bound to the measurement. */
+    /* The act passes only if it told both halves of the story: the secret
+     * came back while the measurement matched, and was refused once it did
+     * not. A refusal on its own could just mean sealing never worked. */
     demo_put("{\"event\":\"seal.end\",\"pass\":");
-    demo_put(rc != TPM_RC_SUCCESS ? "true" : "false");
+    demo_put((sealedOk && rc != TPM_RC_SUCCESS) ? "true" : "false");
     demo_put("}\r\n");
 
     (void)wolfTPM2_ResetPCR(&dev, DEMO_SEAL_PCR);

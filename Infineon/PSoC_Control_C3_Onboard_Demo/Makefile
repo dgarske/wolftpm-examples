@@ -76,3 +76,55 @@ size: mldsa_bench.elf
 clean:
 	rm -f mldsa_bench.elf mldsa_bench.bin mldsa_bench.ld mldsa_bench.map \
 	      mldsa_bench_v*_signed.bin
+
+# ---------------------------------------------------------------------------
+# On-board TPM identity read. Drives the TPM from the MCU over I2C with no
+# host involved, using wolfBoot's I2C driver and a stock wolfTPM.
+# ---------------------------------------------------------------------------
+WOLFTPM_DIR ?= $(HOME)/wolfTPM
+TPM_DEFS = -DTARGET_psoc_c3 -DWOLFBOOT_TPM_I2C -DWOLFSSL_USER_SETTINGS \
+           -DWOLFTPM_USER_SETTINGS \
+           -DPSOC_C3_UART_SCB=3 -DPSOC_C3_UART_PORT=6 \
+           -DPSOC_C3_UART_PCLK_GR=4 -DPSOC_C3_UART_PCLK_IDX=6 \
+           -DPSOC_C3_PCLK_HZ=48000000 \
+           -DPSOC_C3_I2C_SCB=0 -DPSOC_C3_I2C_PORT=9 \
+           -DPSOC_C3_I2C_SCL_PIN=0 -DPSOC_C3_I2C_SDA_PIN=2 \
+           -DPSOC_C3_I2C_HSIOM_SEL=15 -DPSOC_C3_I2C_HZ=100000
+
+TPM_CFLAGS = -mcpu=cortex-m33 -mthumb -Os -Wall \
+             -ffreestanding -ffunction-sections -fdata-sections -fno-common \
+             -I. -I$(WOLFBOOT_DIR) -I$(WOLFBOOT_DIR)/include \
+             -I$(WOLFSSL_DIR) -I$(WOLFTPM_DIR) $(TPM_DEFS) \
+             -include user_settings_tpm.h
+
+WT = $(WOLFTPM_DIR)/src
+TPM_SRCS = tpm_identity.c tpm_io_i2c_c3.c \
+           $(WT)/tpm2.c $(WT)/tpm2_packet.c $(WT)/tpm2_tis.c \
+           $(WT)/tpm2_wrap.c $(WT)/tpm2_crypto.c $(WT)/tpm2_util.c \
+           $(WT)/tpm2_param_enc.c \
+           $(WC)/sha256.c $(WC)/sha512.c $(WC)/hash.c $(WC)/memory.c \
+           $(WC)/wc_port.c $(WC)/logging.c $(WC)/misc.c $(WC)/asn.c \
+           $(WC)/coding.c $(WC)/aes.c $(WC)/hmac.c $(WC)/random.c \
+           $(WC)/ecc.c $(WC)/sp_int.c $(WC)/sp_cortexm.c $(WC)/wolfmath.c \
+           $(WOLFBOOT_DIR)/hal/psoc_c3.c \
+           $(WOLFBOOT_DIR)/hal/i2c/i2c_drv_psoc_c3.c \
+           $(WOLFBOOT_DIR)/test-app/startup_arm.c
+
+.PHONY: tpm tpm-clean
+tpm: tpm_identity.bin
+	@$(SIZE) tpm_identity.elf
+
+tpm_identity.ld: $(WOLFBOOT_DIR)/test-app/ARM-psoc_c3.ld
+	sed -e "s/@WOLFBOOT_TEST_APP_ADDRESS@/$(APP_ADDR)/g" \
+	    -e "s/@WOLFBOOT_TEST_APP_SIZE@/$(APP_SIZE)/g" $< > $@
+
+tpm_identity.elf: $(TPM_SRCS) tpm_identity.ld
+	$(CC) $(TPM_CFLAGS) $(TPM_SRCS) -mcpu=cortex-m33 -mthumb -nostartfiles \
+	    -ffreestanding -Wl,-gc-sections -Wl,-Map=tpm_identity.map \
+	    -T tpm_identity.ld -o $@
+
+tpm_identity.bin: tpm_identity.elf
+	$(OBJCOPY) -O binary $< $@
+
+tpm-clean:
+	rm -f tpm_identity.elf tpm_identity.bin tpm_identity.ld tpm_identity.map

@@ -68,3 +68,40 @@ The core clock is measured rather than assumed. `clock_calibrate()` spins for a 
 ```
 
 **180.17 MHz**, consistent to 0.02 percent across four rounds. Worth stating plainly because it is easy to get wrong: this is the core clock, and it is not the 48 MHz peripheral clock that the console baud divider is derived from. Assuming the peripheral rate applied to the core would overstate every timing on this part by a factor of nearly four.
+
+## Driving the TPM from the board
+
+`tpm_identity.c` reads the TPM's identity with no host involved. It needs no changes to wolfTPM: `WOLFTPM_EXAMPLE_HAL` declares `TPM2_IoCb` without compiling any of wolfTPM's own HAL sources, and `tpm_io_i2c_c3.c` supplies it on top of wolfBoot's I2C driver.
+
+The transfer sequence is wolfBoot's rather than a rewrite: the register write is followed by a stop and a guard delay instead of a repeated start, because the part NAKs briefly after being addressed while it wakes and the specification asks for a guard time that a repeated start cannot provide.
+
+```
+make tpm WOLFBOOT_DIR=<wolfboot> WOLFSSL_DIR=<wolfssl> WOLFTPM_DIR=<wolftpm>
+```
+
+Measured on a C3M6, 1 October 2026:
+
+```
+TPM identity, read on the PSOC Control C3
+  TPM2_Init_ex (no selftest): 0x00000000  bus and TIS OK
+  wolfTPM2_Init            : 0x00000000  started
+  wolfTPM2_GetCapabilities : 0x00000000
+  Mfg IFX Vendor SLB9678 VU Fw 45.91
+done
+```
+
+The two initialisation calls are reported separately on purpose. `TPM2_Init_ex` brings up the TIS layer without issuing a startup, so a part that answers its registers but refuses commands can be told apart from a bus that does not work. From the demo's point of view those two failures look identical, and they call for completely different responses.
+
+### Footprint
+
+```
+   text    8520    data 1348    bss 12040
+```
+
+Under 10 KB of flash and 13.4 KB of RAM. Most of the RAM is the 5 KB command and response buffers, sized in `user_settings_tpm.h` to hold a parameter set 87 signature; an identity read alone would need far less. The code is small because this path needs no cryptography and the linker discards what it does not use, so expect it to grow once keys, sealing and sessions are exercised.
+
+Taken with the benchmark above, a board-side act therefore costs roughly 10 KB of flash for the TPM path, 25 KB for verification, and about 24 KB of RAM between them. On a part with 512 KB of flash and 128 KB of SRAM, neither is a constraint.
+
+### The strap, when there is no bootloader
+
+A standalone image has to drive the interface-select strap itself, and it is the first thing `main()` does. The TPM latches its bus from that pin while its own reset is low, and its reset trails the CPU's by about a millisecond, so there is very little time. With wolfBoot in front of the application `hal_init()` has already done it; the standalone path only just gets there.

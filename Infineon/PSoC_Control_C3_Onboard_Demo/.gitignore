@@ -3,3 +3,7 @@ mldsa_bench.bin
 mldsa_bench.ld
 mldsa_bench.map
 mldsa_bench_v*_signed.bin
+tpm_identity.elf
+tpm_identity.bin
+tpm_identity.ld
+tpm_identity.map

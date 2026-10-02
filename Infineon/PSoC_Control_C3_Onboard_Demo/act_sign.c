@@ -42,6 +42,60 @@ static MlDsaKey pubKey;
 static byte sig[5000];
 static byte digest[WC_SHA256_DIGEST_SIZE];
 
+/* Sign the same digest with a classical key on the same silicon, so the
+ * size and speed comparison the demo draws is between two keys from one
+ * part rather than against a quoted figure. */
+static void compare_classical(WOLFTPM2_DEV* dev, TPM_ECC_CURVE curve,
+    const char* name, const byte* digest, int digestSz)
+{
+    static WOLFTPM2_KEY eccKey;
+    static byte eccSig[256];
+    TPMT_PUBLIC ecctpl;
+    uint32_t t0, keyMs, signMs;
+    int sigSz = (int)sizeof(eccSig);
+    int rc;
+
+    memset(&eccKey, 0, sizeof(eccKey));
+    memset(&ecctpl, 0, sizeof(ecctpl));
+    memset(eccSig, 0, sizeof(eccSig));
+
+    rc = wolfTPM2_GetKeyTemplate_ECC(&ecctpl,
+            TPMA_OBJECT_sensitiveDataOrigin | TPMA_OBJECT_userWithAuth |
+            TPMA_OBJECT_sign | TPMA_OBJECT_fixedTPM |
+            TPMA_OBJECT_fixedParent | TPMA_OBJECT_noDA,
+            curve, TPM_ALG_ECDSA);
+    if (rc != 0)
+        return;
+    ecctpl.nameAlg = TPM_ALG_SHA256;
+
+    t0 = demo_cycles();
+    rc = wolfTPM2_CreatePrimaryKey(dev, &eccKey, TPM_RH_OWNER, &ecctpl,
+            NULL, 0);
+    keyMs = demo_ms_since(t0);
+    if (rc != TPM_RC_SUCCESS)
+        return;
+
+    t0 = demo_cycles();
+    rc = wolfTPM2_SignHash(dev, &eccKey, digest, digestSz, eccSig, &sigSz);
+    signMs = demo_ms_since(t0);
+    if (rc == TPM_RC_SUCCESS) {
+        demo_put("{\"event\":\"compare.classical\",\"alg\":\"");
+        demo_put(name);
+        demo_put("\",\"sig_bytes\":"); demo_put_u32((uint32_t)sigSz);
+        demo_put(",\"keygen_ms\":"); demo_put_u32(keyMs);
+        demo_put(",\"sign_ms\":"); demo_put_u32(signMs);
+        demo_put("}\r\n");
+
+        demo_put("{\"event\":\"compare.bytes\",\"alg\":\"");
+        demo_put(name);
+        demo_put("\",\"bytes\":"); demo_put_u32((uint32_t)sigSz);
+        demo_put(",\"b64\":\"");
+        demo_put_b64(eccSig, (uint32_t)sigSz);
+        demo_put("\"}\r\n");
+    }
+    wolfTPM2_UnloadHandle(dev, &eccKey.handle);
+}
+
 int act_sign(WOLFTPM2_DEV* dev, int tamper)
 {
     wc_Sha256 sha;
@@ -150,6 +204,13 @@ int act_sign(WOLFTPM2_DEV* dev, int tamper)
     demo_put("}\r\n");
 
     wc_MlDsaKey_Free(&pubKey);
+
+    /* Both curves against the same digest, so the panel can show the
+     * post-quantum signature beside two classical ones. */
+    compare_classical(dev, TPM_ECC_NIST_P256, "ECDSA_P256", digest,
+            (int)sizeof(digest));
+    compare_classical(dev, TPM_ECC_NIST_P384, "ECDSA_P384", digest,
+            (int)sizeof(digest));
 
 unload:
     wolfTPM2_UnloadHandle(dev, &tpmKey.handle);

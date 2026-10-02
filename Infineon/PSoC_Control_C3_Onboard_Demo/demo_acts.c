@@ -142,6 +142,12 @@ static int try_unseal(WOLFTPM2_KEY *primary, WOLFTPM2_KEYBLOB *seal,
         return rc;
     sealed.handle = seal->handle;
 
+    /* Clear both auth slots first. Anything left in slot 1 from an earlier
+     * command is still applied to this one, and the TPM rejects it as a bad
+     * authorisation for a session the unseal never meant to use. */
+    wolfTPM2_UnsetAuth(&dev, 0);
+    wolfTPM2_UnsetAuth(&dev, 1);
+
     rc = wolfTPM2_StartSession(&dev, &policy, NULL, NULL,
             TPM_SE_POLICY, TPM_ALG_NULL);
     if (rc != TPM_RC_SUCCESS)
@@ -150,9 +156,16 @@ static int try_unseal(WOLFTPM2_KEY *primary, WOLFTPM2_KEYBLOB *seal,
     rc = wolfTPM2_PolicyPCR(&dev, policy.handle.hndl, TPM_ALG_SHA256,
             pcrArray, 1);
     if (rc == TPM_RC_SUCCESS)
-        rc = wolfTPM2_SetAuthSession(&dev, 0, &policy, 0);
+        rc = wolfTPM2_SetAuthSession(&dev, 0, &policy,
+                TPMA_SESSION_continueSession);
     if (rc != TPM_RC_SUCCESS)
         goto unload_session;
+
+    /* The session HMAC covers the name of the object being authorised, so
+     * the name has to be handed over as well as the session. Without this
+     * the TPM rejects the authorisation with TPM_RC_BAD_AUTH even though
+     * the policy itself is satisfied. */
+    wolfTPM2_SetAuthHandleName(&dev, 0, &sealed.handle);
 
     in.itemHandle = sealed.handle.hndl;
     rc = TPM2_Unseal(&in, &unsealed);
@@ -178,8 +191,13 @@ static void act_seal(void)
     byte digest[TPM_SHA256_DIGEST_SIZE];
     byte out[sizeof(seal_secret) + 1];
     byte pcrArray[1];
+    byte policy[TPM_SHA256_DIGEST_SIZE];
+    WOLFTPM2_SESSION trial;
     TPMT_PUBLIC tpl;
+    word32 policySz = 0;
     int digestSz = 0, outSz, rc, sealedOk = 0;
+
+    memset(&trial, 0, sizeof(trial));
 
     memset(&primary, 0, sizeof(primary));
     memset(&seal, 0, sizeof(seal));
@@ -217,11 +235,43 @@ static void act_seal(void)
     }
 
     pcrArray[0] = (byte)DEMO_SEAL_PCR;
+
+    /* Work out the policy digest the sealed object must demand, using a
+     * trial session: it evaluates the policy without authorising anything.
+     * Letting CreateKeySeal_ex derive this from the PCR list alone is not
+     * enough, because the object also has to be made policy-only. */
+    rc = wolfTPM2_StartSession(&dev, &trial, NULL, NULL, TPM_SE_TRIAL,
+            TPM_ALG_NULL);
+    if (rc == TPM_RC_SUCCESS) {
+        rc = wolfTPM2_PolicyPCR(&dev, trial.handle.hndl, TPM_ALG_SHA256,
+                pcrArray, 1);
+        if (rc == TPM_RC_SUCCESS) {
+            policySz = (word32)sizeof(policy);
+            rc = wolfTPM2_GetPolicyDigest(&dev, trial.handle.hndl, policy,
+                    &policySz);
+        }
+        wolfTPM2_UnloadHandle(&dev, &trial.handle);
+    }
+    if (rc != TPM_RC_SUCCESS) {
+        demo_fail("policy digest", rc);
+        goto out_primary;
+    }
+    demo_put("{\"event\":\"seal.policy\",\"bytes\":");
+    demo_put_u32(policySz);
+    demo_put("}\r\n");
+
     rc = wolfTPM2_GetKeyTemplate_KeySeal(&tpl, TPM_ALG_SHA256);
-    if (rc == TPM_RC_SUCCESS)
+    if (rc == TPM_RC_SUCCESS) {
+        /* Policy-only: without clearing this the object can be opened with
+         * its auth value and the PCR policy is not what gates it. */
+        tpl.objectAttributes &= ~TPMA_OBJECT_userWithAuth;
+        tpl.authPolicy.size = (UINT16)policySz;
+        memcpy(tpl.authPolicy.buffer, policy, policySz);
+
         rc = wolfTPM2_CreateKeySeal_ex(&dev, &seal, &primary.handle, &tpl,
                 NULL, 0, TPM_ALG_SHA256, pcrArray, 1,
                 (const byte *)seal_secret, (int)sizeof(seal_secret) - 1);
+    }
     if (rc != TPM_RC_SUCCESS) {
         demo_fail("CreateKeySeal", rc);
         goto out_primary;
@@ -291,20 +341,41 @@ out_primary:
 static void act_ek_certs(void)
 {
     static byte cert[1600];
+    static TPML_HANDLE handles;
     word32 nvIndex;
     int found = 0, i, rc;
-    static const word32 ekIndices[] = {
-        TPM2_NV_RSA_EK_CERT, TPM2_NV_ECC_EK_CERT
-    };
 
     demo_put("{\"event\":\"ek.begin\"}\r\n");
-    for (i = 0; i < (int)(sizeof(ekIndices) / sizeof(ekIndices[0])); i++) {
+
+    /* Enumerate what is actually in the TCG NV space rather than guessing
+     * indices: which certificates a part ships with varies, and a fixed
+     * list finds nothing on a part that uses different ones. */
+    memset(&handles, 0, sizeof(handles));
+    rc = wolfTPM2_GetHandles(TPM_20_TCG_NV_SPACE, &handles);
+    if (rc < 0) {
+        demo_fail("GetHandles", rc);
+        demo_put("{\"event\":\"ek.end\",\"found\":0}\r\n");
+        return;
+    }
+
+    for (i = 0; i < (int)handles.count; i++) {
         WOLFTPM2_NV nv;
         word32 sz = (word32)sizeof(cert);
+        TPMS_NV_PUBLIC nvPublic;
 
-        nvIndex = ekIndices[i];
+        nvIndex = handles.handle[i];
         memset(&nv, 0, sizeof(nv));
+        memset(&nvPublic, 0, sizeof(nvPublic));
         nv.handle.hndl = nvIndex;
+
+        /* Ask how big it is before reading, so a certificate larger than
+         * the buffer is skipped rather than truncated into the stream. */
+        rc = wolfTPM2_NVReadPublic(&dev, nvIndex, &nvPublic);
+        if (rc != TPM_RC_SUCCESS)
+            continue;
+        if (nvPublic.dataSize == 0 || nvPublic.dataSize > sizeof(cert))
+            continue;
+        sz = nvPublic.dataSize;
 
         rc = wolfTPM2_NVReadAuth(&dev, &nv, nvIndex, cert, &sz, 0);
         if (rc != TPM_RC_SUCCESS)

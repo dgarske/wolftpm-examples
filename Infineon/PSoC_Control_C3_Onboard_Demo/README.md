@@ -168,20 +168,29 @@ Anything other than a listed character is ignored, so a host opening the port an
 
 ### Test status
 
-Measured on hardware, 1 October 2026, driven by `onboard.py` from the demo repository:
+All acts verified on hardware, 1 October 2026, driven by `onboard.py` from the demo repository:
 
-| Act | State |
+| Act | Result |
 | --- | --- |
-| identity | works |
-| measured boot (PCR) | works, all 24 indices |
-| sign and verify | works, figures above |
-| sealed secret | **fails**, see below |
-| endorsement | **fails**, finds no certificates |
+| identity | `Mfg IFX, Vendor SLB9678 VU, Fw 45.91` |
+| measured boot | all 24 PCR indices read |
+| sign and verify | valid, 41 ms verification, `pass: true` |
+| sign, tampered | rejected at offset 2313, `pass: true` |
+| sealed secret | unsealed while the measurement matched, refused with `TPM_RC_POLICY_FAIL` after it changed, `pass: true` |
+| endorsement | 5 certificates, 869 to 1580 bytes |
 
-The sealed-secret act gets as far as creating the blob and then both unseals return `TPM_RC_POLICY_FAIL` (0x99d), including the one taken while the measurement still matches. So the policy the blob was sealed under is not the policy the session presents. The host-side example computes the digest explicitly with a trial session and `wolfTPM2_GetPolicyDigest`, rather than letting `wolfTPM2_CreateKeySeal_ex` derive it from a PCR list, and matching that is the next thing to try.
+### Four things that have to be right for sealing to work
 
-The endorsement act reads nothing from the two TCG certificate indices it tries. The host-side example finds five certificates, so it is looking in more places and almost certainly reading the public area first to size the buffer.
+Each of these failed in a way that pointed somewhere else, so they are worth stating.
 
-Both are reported honestly rather than quietly omitted, because an act that emits a plausible event stream while being wrong is worse than one that is absent.
+**Use an ECC storage root key.** An RSA SRK on this part is slow enough that the act looks hung, and has been seen to drop the TPM into failure mode, from which only removing power recovers it.
 
-One trap worth recording from getting this far: **create an ECC storage root key, not an RSA one.** An RSA SRK on this part is slow enough that the act appears to hang, and has been seen to drop the TPM into failure mode, from which only removing power recovers it.
+**Compute the policy digest with a trial session and clear `TPMA_OBJECT_userWithAuth`.** Letting `wolfTPM2_CreateKeySeal_ex()` derive the policy from a PCR list is not sufficient on its own: the object also has to be made policy-only, or it can be opened with its auth value and the PCR policy is not what gates it. Symptom: `TPM_RC_POLICY_FAIL` on every unseal, including the one that should succeed.
+
+**Call `wolfTPM2_SetAuthHandleName()` as well as `wolfTPM2_SetAuthSession()`.** The session HMAC covers the name of the object being authorised, so the name has to be supplied too. Symptom: `TPM_RC_BAD_AUTH` (0x9a2) with the session-1 indicator, which reads like a session problem rather than a missing name.
+
+**`wolfTPM2_ReadPCR()` takes the digest length as in/out.** It must carry the buffer size in. Symptom: `BUFFER_E` before the command ever reaches the TPM.
+
+### Reading the endorsement certificates
+
+Enumerate the TCG NV space with `wolfTPM2_GetHandles()` rather than trying a fixed list of indices, and read the public area first to size each certificate. A hardcoded index list found nothing on this part while enumeration found five.
